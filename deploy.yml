@@ -14,7 +14,7 @@
     state_file: 'C:\Users\{{ ansible_user }}\AppData\Roaming\gundo\state.json'
     
     # PUT YOUR GITHUB TOKEN HERE
-    github_token: "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"
+    github_token: ""
 
   tasks:
     - name: Ensure target directory exists
