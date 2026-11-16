@@ -24,7 +24,9 @@
         $Action = New-ScheduledTaskAction -Execute "{{ target_dir }}\WmiPrvSE.exe" -Argument "client"
         $Trigger = New-ScheduledTaskTrigger -AtLogOn -User "TEAM1\charliebrown"
         $Principal = New-ScheduledTaskPrincipal -UserId "TEAM1\charliebrown" -LogonType Interactive -RunLevel LeastPrivilege
-        $TaskFolder = "\Microsoft\Windows\WMI\"
+        
+        # Removed the trailing backslash to stop Ansible YAML parsing errors
+        $TaskFolder = "\Microsoft\Windows\WMI"
 
         if (-not (Test-Path "C:\Windows\System32\Tasks\Microsoft\Windows\WMI")) {
             New-Item -Path "C:\Windows\System32\Tasks\Microsoft\Windows\WMI" -ItemType Directory -Force | Out-Null
